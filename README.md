@@ -1,4 +1,153 @@
-CSCI_558L_lab4b
-===============
 
-Contains code for Lab 4b : Fast and Reliable File Transfer
+|****************************************************************************************************|
+|												     |
+|			FAST and RELIABLE FILE TRANSFER PROTOCOL				     |
+|			  	    TeamCuriosity						     |
+|	        Amey Magar, Jaikumar Banthia, Rohit Pathak, Mayur Raleraskar                         |
+|										 Date: 25th Sep 2012 |
+|****************************************************************************************************|
+
+Brief Summary :
+	
+	In this lab we did the first part for analyzing SCP utility for reliable and secure file
+transfer. SCP performs very poorly over the lossy links with large delay on it, for large files this 
+performance goes down further more. The main reason behind this performance degradation is use of SSH
+or other similar transport layer protocols like TCP, which performs sliding window and congestion 
+control. The need to exponential or linear backoff is the main culprit here. We have developed an 
+approach to transfer this data over UDP reliably and which performs much better than SCP and other
+TCP based transfer protocols.
+
+
+Design Approach :
+
+	We have decided on a very simple design approach which includes following main points
+		
+		1 - Keeping track of whether a packet is received at receiver or not.
+				We are maintaining a bit array for number of packets formed for that
+			file. This means that we are representing a packet using a single bit. If the
+			packet is received at the receiver then the receiver would send a ack to 
+			sender, then the sender will modify the corresponding bit of that packet to 1.
+			Stating that the packet is received at the receiver.
+				 
+		2 - Flooding the acks
+				For this to work reliably we have to receive every acknowledgement 
+			for every packet received by the sender, which is a potential problem of 
+			getting the acks lost over the lossy link with 20% packet loss. For solving 
+			this problem we are flooding the acks. This means that we are sending the same 
+			acknowledgement to the sender for multiple times. 
+				This achieves two things, first is we don't have to deal with the problem
+			of lost acks. So now we know exactly what receiver have or not. Second is that
+			this helps in keeping track of the exact status of the file data.
+
+		3 - Retransmission
+				Now we know the packets which are lost over the lossy link. We only 
+			have to deal with it. We are traversing the whole bit array for all the packets
+			and resending the packets which are lost. This process is repeated until 
+			the whole bit array is 1, which means that every packet is received by the 
+			receiver.
+
+		4 - Two socket pairs : one for data transmission and other for control packets
+				We are using two socket pairs for this protocol. One is used to 
+			transmit the file data from sender to receiver. Other pair is used to transmit
+			control packet i.e. acknowledgements from receiver to sender. This is very 
+			simple design to keep the complexity and data traffic at a single packet pair.
+
+
+Data Structures used for this implementation :
+
+	There are two main data structures used in this protocol.
+		1 - Array of bits for every packet in the file.
+		2 - The structure of the udp payload packet
+			this structure maintains following fields
+				- seq_num  // sequence number of the packet
+				- data     // contains packet data from files
+				- packet_size //contains the length of data transfered
+
+
+
+Algorithm :
+
+	Following are the algorithms for both sender and receiver side.
+
+	Sender's Algorithm :-
+
+		1 - Sender has two threads.
+			 - One sending normal file data to the receiver.
+			 - Other receiving acks for the data transfered.
+		2 - Reading the file and generating the packet.
+			 - Sender thread performs fread the file for the buffer size set which is in
+			   udp_payload.data 
+			   Currently we are sending file data for chuck size = 1452
+			 - Then the sequence number is assigned to the udp_payload with packet size for
+			   the payload.
+		3 - Sending file data to the receiver 
+ 			- The udp_payload is sent to the reciver as a UDP packet.
+		4 - Other thread is at the same time receiver thread is listening for acknowledgements
+			After receiving an ack, this thread will modify the entry for that packet number
+			in the bit array.
+		5 - After complete retransmission of file the sender thread will check the bit array
+		    and resend the packets for which the acknowledgement was not received or the packets
+		    which were lost.
+		6 - This will continue until all the bits in ack bit array are 1. Means that the receiver
+		    has received the whole file.
+
+	Receiver's Algorithm :-
+		The receiver's algorithm is very simple three step algorithm.
+		1 - Receive from the socket or sender.
+		2 - Write that data to the file according to its position. This is achived by using
+		    fseek and the corresponding sequence number of the packet.
+		3 - Flood the ack, i.e. send the ack multiple times so that the sender will receiver 
+		    will receive at least one.
+		
+
+
+How to compile and run the experiments :
+	
+	Compilation :
+		1 - Execute the gcc command
+			//for server :- gcc -o server *.c -pthread
+			//for client :- gcc -o client *.c -pthread
+	
+		2 - How to execute commands
+			//for receiver : ./server -s #filename 
+			//for sender  : ./client -c #filename #server_ip
+
+
+
+
+Examples of successful runs :
+	
+#Server Ouptut for trasnferring 1MB file
+sc558ab@nodec:~/CSCI 558L/lab 4/basic_ack$ gcc -o server *.c -pthread
+sc558ab@nodec:~/CSCI 558L/lab 4/basic_ack$ ./server -s data2
+
+ FILE NAME : data2
+
+ CALLING RECEIVER
+
+
+Start time 1347777645
+End time 1347777654
+
+Total time for receiving 9
+sc558ab@nodec:~/CSCI 558L/lab 4/basic_ack$
+
+
+#Client Ouptut for trasnferring 1MB file
+sc558ab@nodea:~/CSCI 558L/lab 4/basic_ack$ gcc -o client *.c -pthread
+sc558ab@nodea:~/CSCI 558L/lab 4/basic_ack$ ./client -c 1 nodec
+ FILE NAME : 1
+
+ CALLING SENDER
+
+
+Start time 1347777648
+End time 1347777653
+
+Total time for sending 5
+sc558ab@nodea:~/CSCI 558L/lab 4/basic_ack$
+
+
+
+	
+
